@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @ObservedObject var viewModel: SourceCodeViewModel
+    @ObservedObject var viewModel: VideoSourceViewModel
     @State private var userAgent: String = ""
     @Environment(\.dismiss) private var dismiss
     
