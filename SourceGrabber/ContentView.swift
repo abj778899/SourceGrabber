@@ -109,15 +109,39 @@ struct ContentView: View {
 
     // MARK: - 状态信息栏
     private var statusBar: some View {
-        HStack(spacing: 12) {
-            statusBadge(text: "\(viewModel.statusCode)", color: viewModel.statusCode == 200 ? .green : .orange)
-            Text("\(viewModel.videoSources.count) 个视频源")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Spacer()
-            Text("\(formatSize(viewModel.contentSize)) · \(String(format: "%.2fs", viewModel.fetchTime))")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                statusBadge(text: "\(viewModel.statusCode)", color: viewModel.statusCode == 200 ? .green : .orange)
+                Text("\(viewModel.videoSources.count) 个视频源")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("\(formatSize(viewModel.contentSize)) · \(String(format: "%.2fs", viewModel.fetchTime))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            if !viewModel.pageTitle.isEmpty || !viewModel.authorName.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    if !viewModel.pageTitle.isEmpty {
+                        Text(viewModel.pageTitle)
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                    }
+                    if !viewModel.authorName.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.circle")
+                                .font(.caption2)
+                                .foregroundColor(.blue)
+                            Text(viewModel.authorName)
+                                .font(.caption2)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
