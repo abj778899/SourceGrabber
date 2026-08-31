@@ -1,19 +1,21 @@
 import SwiftUI
 
 struct ResponseInfoView: View {
-    @ObservedObject var viewModel: SourceCodeViewModel
+    @ObservedObject var viewModel: VideoSourceViewModel
     @Environment(\.dismiss) private var dismiss
-    
+
     var body: some View {
         NavigationView {
             List {
                 Section(header: Text("基本信息")) {
                     infoRow(title: "状态码", value: "\(viewModel.statusCode) \(statusDescription)")
                     infoRow(title: "请求URL", value: viewModel.currentURL)
+                    infoRow(title: "页面标题", value: viewModel.pageTitle)
+                    infoRow(title: "视频源数量", value: "\(viewModel.videoSources.count) 个")
                     infoRow(title: "内容大小", value: formattedSize)
                     infoRow(title: "耗时", value: String(format: "%.2f 秒", viewModel.fetchTime))
                 }
-                
+
                 Section(header: Text("响应头 (\(viewModel.responseHeaders.count) 项)")) {
                     ForEach(Array(viewModel.responseHeaders.keys.sorted()), id: \.self) { key in
                         VStack(alignment: .leading, spacing: 4) {
@@ -40,7 +42,7 @@ struct ResponseInfoView: View {
             }
         }
     }
-    
+
     private var statusDescription: String {
         switch viewModel.statusCode {
         case 200: return "OK"
@@ -57,18 +59,14 @@ struct ResponseInfoView: View {
         default: return ""
         }
     }
-    
+
     private var formattedSize: String {
         let bytes = viewModel.contentSize
-        if bytes < 1024 {
-            return "\(bytes) B"
-        } else if bytes < 1024 * 1024 {
-            return String(format: "%.2f KB", Double(bytes) / 1024)
-        } else {
-            return String(format: "%.2f MB", Double(bytes) / (1024 * 1024))
-        }
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.2f KB", Double(bytes) / 1024) }
+        return String(format: "%.2f MB", Double(bytes) / (1024 * 1024))
     }
-    
+
     private func infoRow(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
