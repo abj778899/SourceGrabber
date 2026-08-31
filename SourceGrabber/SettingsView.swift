@@ -62,7 +62,6 @@ struct SettingsView: View {
                         viewModel.customUserAgent = userAgent
                         dismiss()
                     }
-                    .fontWeight(.semibold)
                 }
             }
             .onAppear {
