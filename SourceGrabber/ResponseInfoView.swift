@@ -37,7 +37,6 @@ struct ResponseInfoView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("完成") { dismiss() }
-                        .fontWeight(.semibold)
                 }
             }
         }
