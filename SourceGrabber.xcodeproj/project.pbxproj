@@ -15,6 +15,9 @@
 		A1000000000000000000006 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000006 /* HistoryView.swift */; };
 		A1000000000000000000007 /* ResponseInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000007 /* ResponseInfoView.swift */; };
 		A1000000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000008 /* Assets.xcassets */; };
+		A1000000000000000000009 /* VideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000009 /* VideoPlayerView.swift */; };
+		A100000000000000000000A /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000A /* DownloadManager.swift */; };
+		A100000000000000000000B /* DownloadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000B /* DownloadListView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +31,9 @@
 		B1000000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B1000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B100000000000000000000A /* SourceGrabber.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SourceGrabber.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B100000000000000000000B /* VideoPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlayerView.swift; sourceTree = "<group>"; };
+		B100000000000000000000C /* DownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadManager.swift; sourceTree = "<group>"; };
+		B100000000000000000000D /* DownloadListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadListView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -61,6 +67,9 @@
 				B1000000000000000000007 /* ResponseInfoView.swift */,
 				B1000000000000000000008 /* Assets.xcassets */,
 				B1000000000000000000009 /* Info.plist */,
+				B100000000000000000000B /* VideoPlayerView.swift */,
+				B100000000000000000000C /* DownloadManager.swift */,
+				B100000000000000000000D /* DownloadListView.swift */,
 			);
 			path = SourceGrabber;
 			sourceTree = "<group>";
@@ -149,6 +158,9 @@
 				A1000000000000000000005 /* SettingsView.swift in Sources */,
 				A1000000000000000000006 /* HistoryView.swift in Sources */,
 				A1000000000000000000007 /* ResponseInfoView.swift in Sources */,
+				A1000000000000000000009 /* VideoPlayerView.swift in Sources */,
+				A100000000000000000000A /* DownloadManager.swift in Sources */,
+				A100000000000000000000B /* DownloadListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
