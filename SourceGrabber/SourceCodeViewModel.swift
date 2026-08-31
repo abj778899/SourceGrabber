@@ -105,9 +105,6 @@ class VideoSourceViewModel: ObservableObject {
         if let str = String(data: data, encoding: .utf8) {
             return str
         }
-        if let str = String(data: data, encoding: .gbk) {
-            return str
-        }
         let cfEncoding = CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue))
         if let str = String(data: data, encoding: String.Encoding(rawValue: cfEncoding)) {
             return str
