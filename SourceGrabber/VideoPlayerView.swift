@@ -38,6 +38,12 @@ struct VideoPlayerView: View {
                             .foregroundColor(.white)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
+                        Button("用浏览器打开") {
+                            if let url = URL(string: videoURL) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        .foregroundColor(.blue)
                     }
                 }
             }
@@ -69,6 +75,25 @@ struct VideoPlayerView: View {
         }
     }
 
+    private func getReferer(for url: String) -> String? {
+        if url.contains("douyin") || url.contains("douyinvod") || url.contains("douyincdn") {
+            return "https://www.douyin.com/"
+        } else if url.contains("kuaishou") || url.contains("ksyun") {
+            return "https://www.kuaishou.com/"
+        } else if url.contains("bilibili") || url.contains("hdslb") {
+            return "https://www.bilibili.com/"
+        } else if url.contains("weibo") || url.contains("sinaimg") {
+            return "https://weibo.com/"
+        } else if url.contains("xiaohongshu") || url.contains("xhscdn") {
+            return "https://www.xiaohongshu.com/"
+        } else if url.contains("youtube") || url.contains("googlevideo") {
+            return "https://www.youtube.com/"
+        } else if url.contains("twitch") || url.contains("ttvnw") {
+            return "https://www.twitch.tv/"
+        }
+        return nil
+    }
+
     private func loadVideo() {
         guard let url = URL(string: videoURL) else {
             errorMessage = "无效的视频地址"
@@ -76,13 +101,33 @@ struct VideoPlayerView: View {
             return
         }
 
-        let playerItem = AVPlayerItem(url: url)
+        var headers: [String: String] = [
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        ]
+
+        if let referer = getReferer(for: videoURL) {
+            headers["Referer"] = referer
+        }
+
+        let assetOptions = ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        let asset = AVURLAsset(url: url, options: assetOptions)
+
+        let playerItem = AVPlayerItem(asset: asset)
         player = AVPlayer(playerItem: playerItem)
         isLoading = false
 
         NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { _ in
-            errorMessage = "视频播放失败，可能格式不支持或地址已失效"
+            errorMessage = "视频播放失败，可能格式不支持或地址已失效，可尝试用浏览器打开"
             isLoading = false
+        }
+
+        NotificationCenter.default.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: playerItem, queue: .main) { _ in
+            if let errorLog = playerItem.errorLog(), let lastEvent = errorLog.events.last {
+                DispatchQueue.main.async {
+                    errorMessage = "播放错误: \(lastEvent.errorComment ?? "未知错误")\n可尝试用浏览器打开"
+                    isLoading = false
+                }
+            }
         }
     }
 }
