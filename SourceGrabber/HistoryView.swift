@@ -1,14 +1,14 @@
 import SwiftUI
 
 struct HistoryView: View {
-    @EnvironmentObject var historyStore: HistoryStore
-    @Environment(\.dismiss) private var dismiss
     let onSelect: (String) -> Void
-    
+    @Environment(\.dismiss) private var dismiss
+    @State private var historyURLs: [String] = []
+
     var body: some View {
         NavigationView {
             Group {
-                if historyStore.records.isEmpty {
+                if historyURLs.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "clock")
                             .font(.system(size: 48))
@@ -18,22 +18,16 @@ struct HistoryView: View {
                     }
                 } else {
                     List {
-                        ForEach(historyStore.records) { record in
+                        ForEach(historyURLs, id: \.self) { url in
                             Button(action: {
-                                onSelect(record.url)
+                                onSelect(url)
                                 dismiss()
                             }) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(record.title)
+                                    Text(url)
                                         .font(.body)
                                         .lineLimit(1)
-                                    Text(record.url)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                    Text(record.date, style: .relative)
-                                        .font(.caption2)
-                                        .foregroundColor(.tertiary)
+                                        .foregroundColor(.primary)
                                 }
                             }
                             .buttonStyle(PlainButtonStyle())
@@ -48,18 +42,22 @@ struct HistoryView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("关闭") { dismiss() }
                 }
-                if !historyStore.records.isEmpty {
+                if !historyURLs.isEmpty {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         EditButton()
                     }
                 }
             }
+            .onAppear(perform: loadHistory)
         }
     }
-    
+
+    private func loadHistory() {
+        historyURLs = UserDefaults.standard.stringArray(forKey: "fetchHistory") ?? []
+    }
+
     private func deleteRecord(at offsets: IndexSet) {
-        offsets.forEach { index in
-            historyStore.removeRecord(historyStore.records[index])
-        }
+        historyURLs.remove(atOffsets: offsets)
+        UserDefaults.standard.set(historyURLs, forKey: "fetchHistory")
     }
 }
