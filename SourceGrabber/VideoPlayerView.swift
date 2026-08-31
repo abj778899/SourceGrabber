@@ -78,8 +78,7 @@ struct VideoPlayerView: View {
 
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
-
-        playerItem.addObserver(self, forKeyPath: "status", options: [.new, .initial], context: nil)
+        isLoading = false
 
         NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { _ in
             errorMessage = "视频播放失败，可能格式不支持或地址已失效"
