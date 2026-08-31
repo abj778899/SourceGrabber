@@ -15,7 +15,7 @@
 		A1000000000000000000006 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000006 /* HistoryView.swift */; };
 		A1000000000000000000007 /* ResponseInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000007 /* ResponseInfoView.swift */; };
 		A1000000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000008 /* Assets.xcassets */; };
-		A1000000000000000000009 /* VideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000000000000000000009 /* VideoPlayerView.swift */; };
+		A1000000000000000000009 /* VideoPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000B /* VideoPlayerView.swift */; };
 		A100000000000000000000A /* DownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000C /* DownloadManager.swift */; };
 		A100000000000000000000B /* DownloadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000D /* DownloadListView.swift */; };
 /* End PBXBuildFile section */
