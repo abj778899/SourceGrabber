@@ -42,10 +42,8 @@ struct HistoryView: View {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("关闭") { dismiss() }
                 }
-                if !historyURLs.isEmpty {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        EditButton()
-                    }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    EditButton()
                 }
             }
             .onAppear(perform: loadHistory)
