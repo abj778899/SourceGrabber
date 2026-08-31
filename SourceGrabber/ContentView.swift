@@ -2,25 +2,22 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = VideoSourceViewModel()
+    @StateObject private var downloadManager = DownloadManager.shared
     @State private var urlInput: String = ""
     @State private var showSettings = false
     @State private var showHistory = false
     @State private var showResponseInfo = false
-    @State private var copiedURL: String?
+    @State private var showDownloads = false
+    @State private var showPlayer = false
+    @State private var selectedVideo: VideoSource?
     @State private var showCopiedToast = false
+    @State private var showExportSheet = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // URL 输入栏
                 urlInputBar
-
-                // 状态信息栏
-                if viewModel.statusCode > 0 {
-                    statusBar
-                }
-
-                // 内容区域
+                statusBar
                 contentArea
             }
             .navigationTitle("视频源抓取器")
@@ -33,11 +30,17 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button(action: { showSettings = true }) {
-                            Label("设置", systemImage: "gear")
+                        Button(action: { showDownloads = true }) {
+                            Label("下载管理", systemImage: "arrow.down.circle")
                         }
                         Button(action: { showResponseInfo = true }) {
                             Label("响应信息", systemImage: "info.circle")
+                        }
+                        Button(action: { showSettings = true }) {
+                            Label("设置", systemImage: "gear")
+                        }
+                        Button(action: { exportSources() }) {
+                            Label("导出视频源", systemImage: "square.and.arrow.up")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -55,6 +58,14 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showResponseInfo) {
                 ResponseInfoView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showDownloads) {
+                DownloadListView()
+            }
+            .sheet(isPresented: $showPlayer) {
+                if let video = selectedVideo {
+                    VideoPlayerView(videoURL: video.url, title: "视频播放")
+                }
             }
             .overlay(
                 Group {
@@ -170,7 +181,7 @@ struct ContentView: View {
             Text("输入网页URL开始抓取视频源")
                 .font(.body)
                 .foregroundColor(.secondary)
-            Text("支持 m3u8、mp4、flv 等格式")
+            Text("支持 m3u8、mp4、flv、直播源等")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -181,21 +192,6 @@ struct ContentView: View {
         List {
             ForEach(viewModel.videoSources) { source in
                 videoSourceRow(source: source)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        copySource(source)
-                    }
-                    .contextMenu {
-                        Button(action: { copySource(source) }) {
-                            Label("复制地址", systemImage: "doc.on.doc")
-                        }
-                        Button(action: { shareSource(source) }) {
-                            Label("分享", systemImage: "square.and.arrow.up")
-                        }
-                        Button(action: { openInBrowser(source) }) {
-                            Label("在浏览器打开", systemImage: "safari")
-                        }
-                    }
             }
         }
         .listStyle(PlainListStyle())
@@ -207,46 +203,91 @@ struct ContentView: View {
     }
 
     private func videoSourceRow(source: VideoSource) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            // 类型图标
-            typeIcon(for: source.type)
-                .frame(width: 40, height: 40)
-                .background(typeColor(for: source.type).opacity(0.15))
-                .cornerRadius(8)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                typeIcon(for: source.type)
+                    .frame(width: 40, height: 40)
+                    .background(typeColor(for: source.type).opacity(0.15))
+                    .cornerRadius(8)
 
-            VStack(alignment: .leading, spacing: 4) {
-                // 类型标签和画质
-                HStack(spacing: 6) {
-                    Text(source.type.uppercased())
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(typeColor(for: source.type))
-                        .cornerRadius(4)
-
-                    if let quality = source.quality {
-                        Text(quality)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(source.type.uppercased())
                             .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.secondary)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(typeColor(for: source.type))
+                            .cornerRadius(4)
+
+                        if let quality = source.quality {
+                            Text(quality)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                        }
                     }
+
+                    Text(source.url)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
 
-                // URL
-                Text(source.url)
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                Spacer()
             }
 
-            Spacer()
-
-            Image(systemName: "doc.on.doc")
+            HStack(spacing: 8) {
+                Button(action: {
+                    selectedVideo = source
+                    showPlayer = true
+                }) {
+                    Label("播放", systemImage: "play.circle")
+                }
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .buttonStyle(.bordered)
+
+                Button(action: {
+                    downloadManager.startDownload(url: source.url, title: "视频_\(source.type)")
+                }) {
+                    Label("下载", systemImage: "arrow.down.circle")
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+
+                Button(action: {
+                    copySource(source)
+                }) {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Menu {
+                    Button(action: {
+                        if let url = URL(string: source.url) {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        Label("浏览器打开", systemImage: "safari")
+                    }
+                    Button(action: {
+                        let activityVC = UIActivityViewController(activityItems: [source.url], applicationActivities: nil)
+                        if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) {
+                            window.rootViewController?.present(activityVC, animated: true)
+                        }
+                    }) {
+                        Label("分享", systemImage: "square.and.arrow.up")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.caption)
+                }
+            }
         }
         .padding(.vertical, 8)
     }
@@ -257,6 +298,7 @@ struct ContentView: View {
         case "m3u8": iconName = "square.stack.3d.down.right"
         case "mp4": iconName = "film"
         case "flv": iconName = "film.stack"
+        case "直播", "live": iconName = "dot.radiowaves.left.and.right"
         default: iconName = "play.rectangle"
         }
         return Image(systemName: iconName)
@@ -269,6 +311,7 @@ struct ContentView: View {
         case "m3u8": return .purple
         case "mp4": return .blue
         case "flv": return .orange
+        case "直播", "live": return .red
         default: return .gray
         }
     }
@@ -302,7 +345,6 @@ struct ContentView: View {
 
     private func copySource(_ source: VideoSource) {
         viewModel.copySource(source)
-        copiedURL = source.url
         withAnimation {
             showCopiedToast = true
         }
@@ -313,18 +355,33 @@ struct ContentView: View {
         }
     }
 
-    private func shareSource(_ source: VideoSource) {
-        if let url = URL(string: source.url) {
-            let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    private func exportSources() {
+        guard !viewModel.videoSources.isEmpty else { return }
+
+        var exportText = "视频源抓取结果\n"
+        exportText += "网址: \(viewModel.currentURL)\n"
+        exportText += "标题: \(viewModel.pageTitle)\n"
+        exportText += "时间: \(Date())\n"
+        exportText += "共 \(viewModel.videoSources.count) 个视频源\n\n"
+        exportText += String(repeating: "=", count: 50) + "\n\n"
+
+        for (index, source) in viewModel.videoSources.enumerated() {
+            exportText += "【\(index + 1)】类型: \(source.type.uppercased())"
+            if let quality = source.quality {
+                exportText += " | 画质: \(quality)"
+            }
+            exportText += "\n\(source.url)\n\n"
+        }
+
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("视频源列表.txt")
+        do {
+            try exportText.write(to: tempURL, atomically: true, encoding: .utf8)
+            let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
             if let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }) {
                 window.rootViewController?.present(activityVC, animated: true)
             }
-        }
-    }
-
-    private func openInBrowser(_ source: VideoSource) {
-        if let url = URL(string: source.url) {
-            UIApplication.shared.open(url)
+        } catch {
+            print("导出失败: \(error)")
         }
     }
 
