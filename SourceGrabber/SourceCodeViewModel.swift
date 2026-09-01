@@ -22,6 +22,8 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
     @Published var pageTitle: String = ""
     @Published var authorName: String = ""
     @Published var statusCode: Int = 0
+    @Published var contentSize: Int = 0
+    @Published var responseHeaders: [String: String] = [:]
     @Published var fetchTime: TimeInterval = 0
     @Published var loadingProgress: Double = 0
     @Published var foundCount: Int = 0
