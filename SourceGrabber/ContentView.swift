@@ -66,9 +66,9 @@ struct ContentView: View {
             .sheet(isPresented: $showDownloads) {
                 DownloadListView()
             }
-            .sheet(isPresented: $showPlayer) {
+            .fullScreenCover(isPresented: $showPlayer) {
                 if let video = selectedVideo {
-                    VideoPlayerView(videoURL: video.url, title: "视频播放")
+                    VideoPlayerWrapper(videoURL: video.url, title: video.quality ?? "视频播放")
                 }
             }
             .overlay(
