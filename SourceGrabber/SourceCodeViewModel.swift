@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import UIKit
 import WebKit
+import AVFoundation
 
 struct VideoSource: Identifiable, Hashable {
     let id = UUID()
@@ -9,6 +10,8 @@ struct VideoSource: Identifiable, Hashable {
     let type: String
     let quality: String?
     let qualityScore: Int
+    var isValid: Bool = true
+    var fileSize: Int64 = 0
 }
 
 class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
@@ -18,18 +21,18 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
     @Published var currentURL: String = ""
     @Published var pageTitle: String = ""
     @Published var authorName: String = ""
-    @Published var responseHeaders: [String: String] = [:]
     @Published var statusCode: Int = 0
-    @Published var contentSize: Int = 0
     @Published var fetchTime: TimeInterval = 0
     @Published var loadingProgress: Double = 0
+    @Published var foundCount: Int = 0
+    @Published var validCount: Int = 0
 
-    private var cancellables = Set<AnyCancellable>()
     private var webView: WKWebView?
     private var startTime: Date = Date()
     private var foundURLs = Set<String>()
     private var timeoutTimer: Timer?
-    private var completionHandler: (() -> Void)?
+    private var verifyQueue = DispatchQueue(label: "com.sourcegrabber.verify", attributes: .concurrent)
+    private var verifyGroup = DispatchGroup()
 
     var customUserAgent: String {
         get { UserDefaults.standard.string(forKey: "customUserAgent") ?? "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1" }
@@ -37,7 +40,8 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
     }
 
     func fetchVideoSources(from urlString: String) {
-        guard let url = URL(string: normalizeURL(urlString)) else {
+        let normalized = normalizeShareURL(urlString)
+        guard let url = URL(string: normalized) else {
             errorMessage = "无效的URL地址"
             return
         }
@@ -45,24 +49,35 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
         isLoading = true
         errorMessage = nil
         videoSources = []
-        responseHeaders = [:]
         statusCode = 0
-        currentURL = url.absoluteString
+        currentURL = normalized
         pageTitle = ""
         authorName = ""
         loadingProgress = 0
+        foundCount = 0
+        validCount = 0
         foundURLs.removeAll()
         startTime = Date()
 
-        // 使用WKWebView模式加载页面
         setupWebView()
         loadWebView(url: url)
 
-        // 设置超时
         timeoutTimer?.invalidate()
-        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: false) { [weak self] _ in
+        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
             self?.handleTimeout()
         }
+    }
+
+    private func normalizeShareURL(_ url: String) -> String {
+        var trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 提取分享文本中的URL
+        if let range = trimmed.range(of: "https?://[^\\s]+", options: .regularExpression) {
+            trimmed = String(trimmed[range])
+        }
+        if !trimmed.hasPrefix("http://") && !trimmed.hasPrefix("https://") {
+            trimmed = "https://" + trimmed
+        }
+        return trimmed
     }
 
     private func setupWebView() {
@@ -70,95 +85,102 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
 
-        // 添加JS注入，用于提取视频源
-        let jsCode = """
-        function extractVideoSources() {
-            var sources = [];
-            var seen = {};
+        // 核心：注入JS拦截所有网络请求（猫爪原理）
+        let interceptJS = """
+        (function() {
+            var videoPatterns = [/\\.m3u8/i, /\\.mp4/i, /\\.flv/i, /\\.ts/i, /\\.mov/i, /\\.m4v/i, /\\.webm/i, /\\.aac/i, /\\.mp3/i, /m3u8/i, /mp4/i, /flv/i, /video/i, /play/i, /stream/i, /live/i, /media/i];
+            var sentURLs = {};
 
-            // 1. 提取video标签的src
-            var videos = document.querySelectorAll('video');
-            videos.forEach(function(v) {
-                if (v.src && !seen[v.src]) { seen[v.src] = 1; sources.push({url: v.src, type: 'video'}); }
-                var sources2 = v.querySelectorAll('source');
-                sources2.forEach(function(s) {
-                    if (s.src && !seen[s.src]) { seen[s.src] = 1; sources.push({url: s.src, type: 'source'}); }
+            function isVideoURL(url) {
+                if (!url || url.length < 10) return false;
+                if (url.indexOf('data:') === 0) return false;
+                if (url.indexOf('blob:') === 0) return false;
+                for (var i = 0; i < videoPatterns.length; i++) {
+                    if (videoPatterns[i].test(url)) return true;
+                }
+                return false;
+            }
+
+            function sendURL(url, type) {
+                if (!url || sentURLs[url]) return;
+                if (!isVideoURL(url)) return;
+                sentURLs[url] = 1;
+                try {
+                    window.webkit.messageHandlers.videoInterceptor.postMessage({url: url, type: type || 'network'});
+                } catch(e) {}
+            }
+
+            // 拦截 XMLHttpRequest
+            var origOpen = XMLHttpRequest.prototype.open;
+            var origSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this._url = url;
+                return origOpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function() {
+                if (this._url) sendURL(this._url, 'xhr');
+                return origSend.apply(this, arguments);
+            };
+
+            // 拦截 fetch
+            var origFetch = window.fetch;
+            if (origFetch) {
+                window.fetch = function(input, init) {
+                    var url = typeof input === 'string' ? input : (input && input.url);
+                    if (url) sendURL(url, 'fetch');
+                    return origFetch.apply(this, arguments);
+                };
+            }
+
+            // 拦截 video/audio 标签的 src
+            function checkMediaElements() {
+                var videos = document.querySelectorAll('video, audio');
+                videos.forEach(function(v) {
+                    if (v.src) sendURL(v.src, 'media');
+                    var sources = v.querySelectorAll('source');
+                    sources.forEach(function(s) {
+                        if (s.src) sendURL(s.src, 'source');
+                    });
                 });
+            }
+
+            // 定期检查新创建的media元素
+            setInterval(checkMediaElements, 1000);
+            setTimeout(checkMediaElements, 500);
+
+            // 监听DOM变化
+            var observer = new MutationObserver(function(mutations) {
+                checkMediaElements();
             });
+            observer.observe(document.documentElement, {childList: true, subtree: true});
 
-            // 2. 提取所有source标签
-            var allSources = document.querySelectorAll('source');
-            allSources.forEach(function(s) {
-                if (s.src && !seen[s.src]) { seen[s.src] = 1; sources.push({url: s.src, type: 'source'}); }
-            });
-
-            // 3. 提取iframe的src
-            var iframes = document.querySelectorAll('iframe');
-            iframes.forEach(function(f) {
-                if (f.src && !seen[f.src]) { seen[f.src] = 1; sources.push({url: f.src, type: 'iframe'}); }
-            });
-
-            // 4. 从页面所有脚本中提取视频地址
-            var scripts = document.querySelectorAll('script');
-            var allText = document.documentElement.innerHTML;
-            var patterns = [
-                /["']([^"']+\\.m3u8[^"']*)["']/gi,
-                /["']([^"']+\\.mp4[^"']*)["']/gi,
-                /["']([^"']+\\.flv[^"']*)["']/gi,
-                /["']([^"']+\\.ts[^"']*)["']/gi,
-                /["']([^"']+\\.mov[^"']*)["']/gi,
-                /(?:url|src|videoUrl|playUrl|mediaUrl|play_url|main_url|video_url|m3u8|mp4)\\s*[:=]\\s*["']([^"']+)["']/gi,
-                /https?:\\/\\/[^"'\\s<>]+\\.(?:m3u8|mp4|flv|ts|mov|m4v|webm)[^"'\\s<>]*/gi
-            ];
-
-            patterns.forEach(function(pattern) {
-                var match;
-                while ((match = pattern.exec(allText)) !== null) {
-                    var url = match[1] || match[0];
-                    if (url && !seen[url]) { seen[url] = 1; sources.push({url: url, type: 'js'}); }
-                }
-            });
-
-            // 5. 提取常见播放器配置
-            var playerConfigs = [
-                window.player, window.playerConfig, window.playerData,
-                window.dplayer, window.dp, window.ckplayer, window.jwplayer,
-                window.videoConfig, window.mediaConfig, window.playConfig
-            ];
-            playerConfigs.forEach(function(cfg) {
-                if (cfg) {
-                    try {
-                        var json = JSON.stringify(cfg);
-                        var urlMatch = json.match(/["']?(?:url|src|videoUrl|playUrl|mediaUrl)["']?\\s*[:=]\\s*["']([^"']+)["']/i);
-                        if (urlMatch && !seen[urlMatch[1]]) {
-                            seen[urlMatch[1]] = 1;
-                            sources.push({url: urlMatch[1], type: 'player'});
-                        }
-                    } catch(e) {}
-                }
-            });
-
-            // 6. 从meta标签提取
-            var metas = document.querySelectorAll('meta');
-            metas.forEach(function(m) {
-                var content = m.getAttribute('content');
-                var property = m.getAttribute('property') || m.getAttribute('name');
-                if (content && property && (property.includes('video') || property.includes('media'))) {
-                    if (content.match(/\\.(m3u8|mp4|flv|ts|mov)/i) && !seen[content]) {
-                        seen[content] = 1;
-                        sources.push({url: content, type: 'meta'});
+            // 从页面HTML中提取
+            function extractFromHTML() {
+                var html = document.documentElement.innerHTML;
+                var patterns = [
+                    /["']([^"']+\\.m3u8[^"']*)["']/gi,
+                    /["']([^"']+\\.mp4[^"']*)["']/gi,
+                    /["']([^"']+\\.flv[^"']*)["']/gi,
+                    /["']([^"']+\\.ts[^"']*)["']/gi,
+                    /(?:url|src|videoUrl|playUrl|mediaUrl|play_url|main_url|video_url|m3u8|mp4|flv)\\s*[:=]\\s*["']([^"']+)["']/gi,
+                    /https?:\\/\\/[^"'\\s<>]+\\.(?:m3u8|mp4|flv|ts|mov|m4v|webm)[^"'\\s<>]*/gi
+                ];
+                patterns.forEach(function(pattern) {
+                    var match;
+                    while ((match = pattern.exec(html)) !== null) {
+                        var url = match[1] || match[0];
+                        sendURL(url, 'html');
                     }
-                }
-            });
-
-            return sources;
-        }
-        window.webkit.messageHandlers.videoSources.postMessage(extractVideoSources());
+                });
+            }
+            setTimeout(extractFromHTML, 2000);
+            setTimeout(extractFromHTML, 5000);
+        })();
         """
 
-        let userScript = WKUserScript(source: jsCode, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        let userScript = WKUserScript(source: interceptJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         config.userContentController.addUserScript(userScript)
-        config.userContentController.add(self, name: "videoSources")
+        config.userContentController.add(self, name: "videoInterceptor")
 
         webView = WKWebView(frame: .zero, configuration: config)
         webView?.navigationDelegate = self
@@ -169,6 +191,7 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
     private func loadWebView(url: URL) {
         var request = URLRequest(url: url)
         request.setValue(customUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("zh-CN,zh;q=0.9", forHTTPHeaderField: "Accept-Language")
         webView?.load(request)
     }
 
@@ -176,10 +199,14 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loadingProgress = 1.0
         pageTitle = webView.title ?? ""
+        statusCode = 200
 
-        // 等待一下让JS执行完成，然后提取视频源
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.extractFromWebView()
+        // 提取作者信息
+        extractAuthorInfo()
+
+        // 页面加载完成后，再等几秒让视频请求都发出来
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+            self?.startVerification()
         }
     }
 
@@ -193,111 +220,150 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
 
     // MARK: - WKScriptMessageHandler
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "videoSources" {
-            if let sources = message.body as? [[String: String]] {
-                processExtractedSources(sources)
+        if message.name == "videoInterceptor" {
+            if let dict = message.body as? [String: String], let url = dict["url"] {
+                addFoundURL(url, type: dict["type"] ?? "network")
             }
         }
     }
 
-    private func extractFromWebView() {
-        let jsCode = """
-        (function() {
-            var sources = [];
-            var seen = {};
+    private func addFoundURL(_ rawURL: String, type: String) {
+        let cleanURL = cleanVideoURL(rawURL)
+        let absoluteURL = resolveURL(cleanURL)
 
-            // 1. video标签
-            var videos = document.querySelectorAll('video');
-            videos.forEach(function(v) {
-                if (v.src && !seen[v.src]) { seen[v.src] = 1; sources.push({url: v.src, type: 'video'}); }
-                var ss = v.querySelectorAll('source');
-                ss.forEach(function(s) { if (s.src && !seen[s.src]) { seen[s.src] = 1; sources.push({url: s.src, type: 'source'}); } });
-            });
+        guard !foundURLs.contains(absoluteURL) else { return }
+        guard isValidVideoURL(absoluteURL) else { return }
 
-            // 2. 所有source标签
-            document.querySelectorAll('source').forEach(function(s) {
-                if (s.src && !seen[s.src]) { seen[s.src] = 1; sources.push({url: s.src, type: 'source'}); }
-            });
+        foundURLs.insert(absoluteURL)
+        foundCount = foundURLs.count
 
-            // 3. iframe
-            document.querySelectorAll('iframe').forEach(function(f) {
-                if (f.src && !seen[f.src]) { seen[f.src] = 1; sources.push({url: f.src, type: 'iframe'}); }
-            });
-
-            // 4. 从HTML中用正则提取
-            var html = document.documentElement.innerHTML;
-            var patterns = [
-                /["']([^"']+\\.m3u8[^"']*)["']/gi,
-                /["']([^"']+\\.mp4[^"']*)["']/gi,
-                /["']([^"']+\\.flv[^"']*)["']/gi,
-                /["']([^"']+\\.ts[^"']*)["']/gi,
-                /(?:url|src|videoUrl|playUrl|mediaUrl|play_url|main_url|video_url)\\s*[:=]\\s*["']([^"']+)["']/gi,
-                /https?:\\/\\/[^"'\\s<>]+\\.(?:m3u8|mp4|flv|ts|mov|m4v|webm)[^"'\\s<>]*/gi
-            ];
-            patterns.forEach(function(p) {
-                var m;
-                while ((m = p.exec(html)) !== null) {
-                    var u = m[1] || m[0];
-                    if (u && !seen[u]) { seen[u] = 1; sources.push({url: u, type: 'regex'}); }
-                }
-            });
-
-            return sources;
-        })();
-        """
-
-        webView?.evaluateJavaScript(jsCode) { [weak self] result, error in
-            if let sources = result as? [[String: String]] {
-                self?.processExtractedSources(sources)
-            } else {
-                self?.finishLoading()
-            }
-        }
-    }
-
-    private func processExtractedSources(_ sources: [[String: String]]) {
-        for source in sources {
-            guard let url = source["url"] else { continue }
-            let cleanURL = cleanVideoURL(url)
-            let absoluteURL = resolveURL(cleanURL)
-            if !foundURLs.contains(absoluteURL) && isValidVideoURL(absoluteURL) {
-                foundURLs.insert(absoluteURL)
-                let type = source["type"] ?? detectType(from: absoluteURL)
-                let quality = extractQuality(from: absoluteURL)
-                let score = qualityScore(for: quality)
-                let newSource = VideoSource(url: absoluteURL, type: type, quality: quality, qualityScore: score)
-                DispatchQueue.main.async {
-                    self.videoSources.append(newSource)
-                    self.videoSources.sort { $0.qualityScore > $1.qualityScore }
-                }
-            }
-        }
-        finishLoading()
-    }
-
-    private func finishLoading() {
-        timeoutTimer?.invalidate()
-        timeoutTimer = nil
-        fetchTime = Date().timeIntervalSince(startTime)
-        contentSize = foundURLs.count
+        let quality = extractQuality(from: absoluteURL)
+        let score = qualityScore(for: quality)
+        let source = VideoSource(url: absoluteURL, type: type, quality: quality, qualityScore: score)
 
         DispatchQueue.main.async {
-            self.isLoading = false
-            if self.videoSources.isEmpty {
-                self.errorMessage = "未在页面中找到有效的视频源地址，该网站可能需要登录或有验证码"
+            self.videoSources.append(source)
+            self.videoSources.sort { $0.qualityScore > $1.qualityScore }
+        }
+    }
+
+    private func extractAuthorInfo() {
+        let js = """
+        (function() {
+            var author = '';
+            var metaAuthor = document.querySelector('meta[name="author"]');
+            if (metaAuthor) author = metaAuthor.getAttribute('content') || '';
+            if (!author) {
+                var ogAuthor = document.querySelector('meta[property="og:article:author"]');
+                if (ogAuthor) author = ogAuthor.getAttribute('content') || '';
+            }
+            if (!author && document.title) {
+                var parts = document.title.split(/[-_|]/);
+                if (parts.length > 1) {
+                    var last = parts[parts.length - 1].trim();
+                    if (last.length > 0 && last.length < 30) author = last;
+                }
+            }
+            return author;
+        })();
+        """
+        webView?.evaluateJavaScript(js) { [weak self] result, _ in
+            if let author = result as? String, !author.isEmpty {
+                DispatchQueue.main.async {
+                    self?.authorName = author
+                }
+            }
+        }
+    }
+
+    private func startVerification() {
+        timeoutTimer?.invalidate()
+        timeoutTimer = nil
+
+        guard !foundURLs.isEmpty else {
+            finishLoading()
+            return
+        }
+
+        let urlsToVerify = Array(foundURLs)
+        var validSources: [VideoSource] = []
+        let lock = NSLock()
+
+        for url in urlsToVerify {
+            verifyGroup.enter()
+            verifyQueue.async {
+                self.verifyURL(url) { isValid, fileSize in
+                    lock.lock()
+                    if isValid {
+                        let quality = self.extractQuality(from: url)
+                        let score = self.qualityScore(for: quality)
+                        let source = VideoSource(url: url, type: "verified", quality: quality, qualityScore: score, isValid: true, fileSize: fileSize)
+                        validSources.append(source)
+                        DispatchQueue.main.async {
+                            self.validCount = validSources.count
+                        }
+                    }
+                    lock.unlock()
+                    self.verifyGroup.leave()
+                }
             }
         }
 
-        // 清理webView
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            self.webView?.stopLoading()
-            self.webView = nil
+        verifyGroup.notify(queue: .main) {
+            validSources.sort { $0.qualityScore > $1.qualityScore }
+            self.videoSources = validSources
+            self.finishLoading()
         }
+    }
+
+    private func verifyURL(_ urlString: String, completion: @escaping (Bool, Int64) -> Void) {
+        guard let url = URL(string: urlString) else {
+            completion(false, 0)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.setValue(customUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+
+        // 对m3u8用GET，因为有些服务器不支持HEAD
+        if urlString.lowercased().contains(".m3u8") {
+            request.httpMethod = "GET"
+        }
+
+        let task = URLSession.shared.dataTask(with: request) { _, response, error in
+            if let error = error {
+                completion(false, 0)
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(false, 0)
+                return
+            }
+            let statusCode = httpResponse.statusCode
+            let contentType = httpResponse.allHeaderFields["Content-Type"] as? String ?? ""
+            let contentLength = Int64(httpResponse.allHeaderFields["Content-Length"] as? String ?? "0") ?? 0
+
+            let isValid = (statusCode == 200 || statusCode == 206) &&
+                          (contentType.contains("video") ||
+                           contentType.contains("audio") ||
+                           contentType.contains("mpegurl") ||
+                           contentType.contains("octet-stream") ||
+                           contentType.contains("mp4") ||
+                           contentType.contains("x-mpegURL") ||
+                           urlString.lowercased().contains(".m3u8") ||
+                           urlString.lowercased().contains(".mp4") ||
+                           urlString.lowercased().contains(".flv"))
+
+            completion(isValid, contentLength)
+        }
+        task.resume()
     }
 
     private func handleTimeout() {
-        // 超时后尝试提取已加载的内容
-        extractFromWebView()
+        startVerification()
     }
 
     private func handleError(_ message: String) {
@@ -306,6 +372,20 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
         DispatchQueue.main.async {
             self.isLoading = false
             self.errorMessage = "加载失败: \(message)"
+        }
+    }
+
+    private func finishLoading() {
+        fetchTime = Date().timeIntervalSince(startTime)
+        DispatchQueue.main.async {
+            self.isLoading = false
+            if self.videoSources.isEmpty {
+                self.errorMessage = "未找到可播放的视频源，该网站可能需要登录或有验证码保护"
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            self.webView?.stopLoading()
+            self.webView = nil
         }
     }
 
@@ -318,14 +398,6 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
     }
 
     // MARK: - 工具方法
-    private func normalizeURL(_ urlString: String) -> String {
-        var trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.hasPrefix("http://") && !trimmed.hasPrefix("https://") {
-            trimmed = "https://" + trimmed
-        }
-        return trimmed
-    }
-
     private func cleanVideoURL(_ url: String) -> String {
         var clean = url
         clean = clean.replacingOccurrences(of: "\\u002F", with: "/")
@@ -367,10 +439,14 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
                           lowercased.contains(".mov") ||
                           lowercased.contains(".m4v") ||
                           lowercased.contains(".webm") ||
+                          lowercased.contains(".aac") ||
+                          lowercased.contains(".mp3") ||
                           lowercased.contains("player") ||
                           lowercased.contains("play.php") ||
                           lowercased.contains("video.php") ||
-                          lowercased.contains("api.php")
+                          lowercased.contains("api.php") ||
+                          lowercased.contains("stream") ||
+                          lowercased.contains("live")
         if !hasVideoExt {
             return false
         }
@@ -392,17 +468,6 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
             return false
         }
         return true
-    }
-
-    private func detectType(from url: String) -> String {
-        let lowercased = url.lowercased()
-        if lowercased.contains(".m3u8") { return "m3u8" }
-        if lowercased.contains(".mp4") { return "mp4" }
-        if lowercased.contains(".flv") { return "flv" }
-        if lowercased.contains(".ts") { return "ts" }
-        if lowercased.contains(".mov") { return "mov" }
-        if lowercased.contains("iframe") { return "iframe" }
-        return "video"
     }
 
     private func extractQuality(from url: String) -> String? {
@@ -433,13 +498,11 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
         UIPasteboard.general.string = source.url
     }
 
-    func shareSource(_ source: VideoSource) -> URL? {
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("video_url.txt")
-        do {
-            try source.url.write(to: tempURL, atomically: true, encoding: .utf8)
-            return tempURL
-        } catch {
-            return nil
-        }
+    func formatFileSize(_ bytes: Int64) -> String {
+        if bytes <= 0 { return "未知" }
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        if bytes < 1024 * 1024 * 1024 { return String(format: "%.1f MB", Double(bytes) / (1024 * 1024)) }
+        return String(format: "%.2f GB", Double(bytes) / (1024 * 1024 * 1024))
     }
 }
