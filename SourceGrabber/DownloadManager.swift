@@ -5,7 +5,7 @@ import Combine
 struct DownloadItem: Identifiable {
     let id = UUID()
     let url: String
-    let title: String
+    var title: String
     var progress: Double = 0
     var status: DownloadStatus = .waiting
     var localPath: URL?
@@ -122,11 +122,22 @@ class DownloadManager: NSObject, ObservableObject {
 
 extension DownloadManager: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let itemID = tasks[downloadTask] else { return }
+        guard let itemID = tasks[downloadTask],
+              let itemIndex = downloads.firstIndex(where: { $0.id == itemID }) else { return }
 
-        let fileName = downloadTask.originalRequest?.url?.lastPathComponent ?? "video.mp4"
-        let safeFileName = fileName.replacingOccurrences(of: "/", with: "_")
-        let destinationURL = getDocumentsDirectory().appendingPathComponent(safeFileName)
+        let item = downloads[itemIndex]
+        let fileExtension = downloadTask.originalRequest?.url?.pathExtension ?? "mp4"
+        let safeTitle = item.title.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "*", with: "_")
+            .replacingOccurrences(of: "?", with: "_")
+            .replacingOccurrences(of: "\"", with: "_")
+            .replacingOccurrences(of: "<", with: "_")
+            .replacingOccurrences(of: ">", with: "_")
+            .replacingOccurrences(of: "|", with: "_")
+        let fileName = "\(safeTitle).\(fileExtension)"
+        let destinationURL = getDocumentsDirectory().appendingPathComponent(fileName)
 
         do {
             if FileManager.default.fileExists(atPath: destinationURL.path) {
