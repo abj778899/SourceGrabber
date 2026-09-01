@@ -404,7 +404,7 @@ struct ContentView: View {
                         HStack {
                             Spacer()
                             Label("开始下载", systemImage: "arrow.down.circle.fill")
-                                .fontWeight(.semibold)
+                                .font(.subheadline.weight(.semibold))
                             Spacer()
                         }
                     }
