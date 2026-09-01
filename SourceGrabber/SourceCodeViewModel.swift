@@ -72,12 +72,40 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
 
     private func normalizeShareURL(_ url: String) -> String {
         var trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 提取分享文本中的URL
-        if let range = trimmed.range(of: "https?://[^\\s]+", options: .regularExpression) {
-            trimmed = String(trimmed[range])
+
+        // 从分享文本中提取URL（支持各种格式）
+        let patterns = [
+            "https?://[^\\s]+",
+            "https?://[^\\u4e00-\\u9fa5\\s]+",
+            "v\\.douyin\\.com/[^\\s]+",
+            "v\\.kuaishou\\.com/[^\\s]+"
+        ]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let nsRange = NSRange(trimmed.startIndex..., in: trimmed)
+                if let match = regex.firstMatch(in: trimmed, options: [], range: nsRange),
+                   let range = Range(match.range, in: trimmed) {
+                    var extracted = String(trimmed[range])
+                    // 移除尾部的中文和特殊字符
+                    if let endRange = extracted.rangeOfCharacter(from: CharacterSet(charactersIn: " \t\n\r【】#@")) {
+                        extracted = String(extracted[..<endRange.lowerBound])
+                    }
+                    trimmed = extracted
+                    break
+                }
+            }
         }
+
+        // 移除可能的尾部垃圾字符
+        trimmed = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?，。；：！？、"))
+
         if !trimmed.hasPrefix("http://") && !trimmed.hasPrefix("https://") {
-            trimmed = "https://" + trimmed
+            if trimmed.hasPrefix("v.douyin.com") || trimmed.hasPrefix("v.kuaishou.com") {
+                trimmed = "https://" + trimmed
+            } else {
+                trimmed = "https://" + trimmed
+            }
         }
         return trimmed
     }
@@ -325,17 +353,18 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
         }
 
         var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
+        request.httpMethod = "GET"
         request.setValue(customUserAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("*/*", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 10
+        request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
+        request.timeoutInterval = 8
 
-        // 对m3u8用GET，因为有些服务器不支持HEAD
-        if urlString.lowercased().contains(".m3u8") {
-            request.httpMethod = "GET"
+        // 添加Referer头
+        if let referer = getReferer(for: urlString) {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
         }
 
-        let task = URLSession.shared.dataTask(with: request) { _, response, error in
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 completion(false, 0)
                 return
@@ -345,23 +374,68 @@ class VideoSourceViewModel: NSObject, ObservableObject, WKNavigationDelegate, WK
                 return
             }
             let statusCode = httpResponse.statusCode
-            let contentType = httpResponse.allHeaderFields["Content-Type"] as? String ?? ""
+            let contentType = (httpResponse.allHeaderFields["Content-Type"] as? String ?? "").lowercased()
             let contentLength = Int64(httpResponse.allHeaderFields["Content-Length"] as? String ?? "0") ?? 0
 
-            let isValid = (statusCode == 200 || statusCode == 206) &&
-                          (contentType.contains("video") ||
-                           contentType.contains("audio") ||
-                           contentType.contains("mpegurl") ||
-                           contentType.contains("octet-stream") ||
-                           contentType.contains("mp4") ||
-                           contentType.contains("x-mpegURL") ||
-                           urlString.lowercased().contains(".m3u8") ||
-                           urlString.lowercased().contains(".mp4") ||
-                           urlString.lowercased().contains(".flv"))
+            // 状态码必须是200或206
+            guard statusCode == 200 || statusCode == 206 else {
+                completion(false, 0)
+                return
+            }
 
-            completion(isValid, contentLength)
+            // 检查Content-Type
+            let isValidType = contentType.contains("video") ||
+                              contentType.contains("audio") ||
+                              contentType.contains("mpegurl") ||
+                              contentType.contains("octet-stream") ||
+                              contentType.contains("mp4") ||
+                              contentType.contains("x-mpegurl") ||
+                              contentType.contains("vnd.apple.mpegurl") ||
+                              contentType.contains("application/x-mpegurl") ||
+                              contentType.contains("binary")
+
+            // 如果Content-Type不明确，检查URL扩展名
+            let urlLower = urlString.lowercased()
+            let hasVideoExt = urlLower.contains(".m3u8") ||
+                              urlLower.contains(".mp4") ||
+                              urlLower.contains(".flv") ||
+                              urlLower.contains(".ts") ||
+                              urlLower.contains(".mov") ||
+                              urlLower.contains(".m4v") ||
+                              urlLower.contains(".webm")
+
+            guard isValidType || hasVideoExt else {
+                completion(false, 0)
+                return
+            }
+
+            // 对于m3u8，验证内容是否真的是m3u8格式
+            if urlLower.contains(".m3u8"), let data = data {
+                if let content = String(data: data, encoding: .utf8) {
+                    if !content.contains("#EXTM3U") && !content.contains("#EXTINF") {
+                        // 可能不是真正的m3u8，但可能是加密的，暂时保留
+                    }
+                }
+            }
+
+            completion(true, contentLength)
         }
         task.resume()
+    }
+
+    private func getReferer(for url: String) -> String? {
+        if url.contains("douyin") || url.contains("douyinvod") || url.contains("douyincdn") || url.contains("iesdouyin") {
+            return "https://www.douyin.com/"
+        } else if url.contains("kuaishou") || url.contains("ksyun") {
+            return "https://www.kuaishou.com/"
+        } else if url.contains("bilibili") || url.contains("hdslb") {
+            return "https://www.bilibili.com/"
+        } else if url.contains("weibo") || url.contains("sinaimg") {
+            return "https://weibo.com/"
+        } else if url.contains("xiaohongshu") || url.contains("xhscdn") {
+            return "https://www.xiaohongshu.com/"
+        }
+        return nil
     }
 
     private func handleTimeout() {
