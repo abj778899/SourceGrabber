@@ -35,7 +35,7 @@ class DownloadManager: NSObject, ObservableObject {
         super.init()
         let config = URLSessionConfiguration.default
         config.isDiscretionary = false
-        session = URLSession(config: config, delegate: self, delegateQueue: nil)
+        session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
     func startDownload(url: String, title: String) {
@@ -201,7 +201,7 @@ class M3U8Downloader: NSObject, URLSessionDownloadDelegate {
         self.progressHandler = progressHandler
         super.init()
         let config = URLSessionConfiguration.default
-        session = URLSession(config: config, delegate: self, delegateQueue: nil)
+        session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
     func start() {
