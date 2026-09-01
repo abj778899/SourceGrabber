@@ -428,7 +428,14 @@ struct ContentView: View {
         let sameTypeSources = viewModel.videoSources.filter { $0.type == source.type }
         downloadSources = sameTypeSources.isEmpty ? [source] : sameTypeSources
         selectedDownloadSource = source
-        downloadTitle = "视频_\(source.type)_\(source.quality ?? "默认")"
+
+        // 默认标题
+        var defaultTitle = "视频"
+        if let quality = source.quality {
+            defaultTitle += "_\(quality)"
+        }
+        downloadTitle = defaultTitle
+
         showDownloadDialog = true
     }
 
