@@ -218,8 +218,24 @@ class M3U8Downloader: NSObject, URLSessionDownloadDelegate {
         var request = URLRequest(url: playlistURL)
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
 
+        // 添加Referer
+        if let referer = getReferer(for: url) {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
+        }
+
         let task = session.downloadTask(with: request)
         task.resume()
+    }
+
+    private func getReferer(for url: String) -> String? {
+        if url.contains("douyin") || url.contains("douyinvod") || url.contains("douyincdn") {
+            return "https://www.douyin.com/"
+        } else if url.contains("kuaishou") || url.contains("ksyun") {
+            return "https://www.kuaishou.com/"
+        } else if url.contains("bilibili") || url.contains("hdslb") {
+            return "https://www.bilibili.com/"
+        }
+        return nil
     }
 
     func pause() {
@@ -292,37 +308,54 @@ class M3U8Downloader: NSObject, URLSessionDownloadDelegate {
         var request = URLRequest(url: url)
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", forHTTPHeaderField: "User-Agent")
 
+        // 添加Referer
+        if let referer = getReferer(for: segmentURL) {
+            request.setValue(referer, forHTTPHeaderField: "Referer")
+        }
+
         currentTask = session.downloadTask(with: request)
         currentTask?.resume()
     }
 
     private func mergeSegments() {
-        let outputURL = getDocumentsDirectory().appendingPathComponent("\(title).ts")
+        // 清理标题中的特殊字符
+        let safeTitle = title.replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "*", with: "_")
+            .replacingOccurrences(of: "?", with: "_")
+            .replacingOccurrences(of: "\"", with: "_")
+            .replacingOccurrences(of: "<", with: "_")
+            .replacingOccurrences(of: ">", with: "_")
+            .replacingOccurrences(of: "|", with: "_")
+            .replacingOccurrences(of: "。", with: "")
+            .replacingOccurrences(of: "，", with: "")
+            .replacingOccurrences(of: "、", with: "")
 
-        // 合并所有ts文件
-        let outputHandle = try? FileHandle(forWritingTo: outputURL)
-        if outputHandle == nil {
-            FileManager.default.createFile(atPath: outputURL.path, contents: nil)
-            let handle = try? FileHandle(forWritingTo: outputURL)
-            handle?.seekToEndOfFile()
+        let outputURL = getDocumentsDirectory().appendingPathComponent("\(safeTitle).ts")
 
-            for i in 0..<totalSegments {
-                let segmentFile = tempDir.appendingPathComponent("segment_\(i).ts")
-                if let data = try? Data(contentsOf: segmentFile) {
-                    handle?.write(data)
-                }
-            }
-            handle?.closeFile()
-        } else {
-            outputHandle?.seekToEndOfFile()
-            for i in 0..<totalSegments {
-                let segmentFile = tempDir.appendingPathComponent("segment_\(i).ts")
-                if let data = try? Data(contentsOf: segmentFile) {
-                    outputHandle?.write(data)
-                }
-            }
-            outputHandle?.closeFile()
+        // 如果文件已存在，先删除
+        if FileManager.default.fileExists(atPath: outputURL.path) {
+            try? FileManager.default.removeItem(at: outputURL)
         }
+
+        // 创建空文件
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+
+        guard let handle = try? FileHandle(forWritingTo: outputURL) else {
+            progressHandler(0, .failed, nil)
+            return
+        }
+
+        // 依次写入所有ts分片
+        for i in 0..<totalSegments {
+            let segmentFile = tempDir.appendingPathComponent("segment_\(i).ts")
+            if let data = try? Data(contentsOf: segmentFile) {
+                handle.write(data)
+            }
+        }
+
+        handle.closeFile()
 
         // 清理临时文件
         try? FileManager.default.removeItem(at: tempDir)
