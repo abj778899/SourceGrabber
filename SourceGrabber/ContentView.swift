@@ -12,6 +12,10 @@ struct ContentView: View {
     @State private var selectedVideo: VideoSource?
     @State private var showCopiedToast = false
     @State private var showExportSheet = false
+    @State private var showDownloadDialog = false
+    @State private var downloadTitle = ""
+    @State private var selectedDownloadSource: VideoSource?
+    @State private var downloadSources: [VideoSource] = []
 
     var body: some View {
         NavigationView {
@@ -74,6 +78,9 @@ struct ContentView: View {
                     }
                 }
             )
+            .sheet(isPresented: $showDownloadDialog) {
+                downloadDialog
+            }
         }
         .navigationViewStyle(StackNavigationViewStyle())
     }
@@ -274,7 +281,7 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
 
                 Button(action: {
-                    downloadManager.startDownload(url: source.url, title: "视频_\(source.type)")
+                    showDownloadDialog(for: source)
                 }) {
                     Label("下载", systemImage: "arrow.down.circle")
                 }
@@ -338,6 +345,97 @@ struct ContentView: View {
         case "直播", "live": return .red
         default: return .gray
         }
+    }
+
+    // MARK: - 下载对话框
+    private var downloadDialog: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("文件标题")) {
+                    TextField("输入文件标题", text: $downloadTitle)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                }
+
+                if downloadSources.count > 1 {
+                    Section(header: Text("选择清晰度")) {
+                        ForEach(downloadSources) { source in
+                            Button(action: {
+                                selectedDownloadSource = source
+                            }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(spacing: 6) {
+                                            Text(source.type.uppercased())
+                                                .font(.caption2)
+                                                .fontWeight(.bold)
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(typeColor(for: source.type))
+                                                .cornerRadius(4)
+
+                                            if let quality = source.quality {
+                                                Text(quality)
+                                                    .font(.caption2)
+                                                    .fontWeight(.semibold)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                        Text(source.url)
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    if selectedDownloadSource?.id == source.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                            }
+                            .foregroundColor(.primary)
+                        }
+                    }
+                }
+
+                Section {
+                    Button(action: confirmDownload) {
+                        HStack {
+                            Spacer()
+                            Label("开始下载", systemImage: "arrow.down.circle.fill")
+                                .fontWeight(.semibold)
+                            Spacer()
+                        }
+                    }
+                    .disabled(downloadTitle.isEmpty || selectedDownloadSource == nil)
+                }
+            }
+            .navigationTitle("下载设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("取消") {
+                        showDownloadDialog = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func showDownloadDialog(for source: VideoSource) {
+        // 收集同类型的所有源作为清晰度选项
+        let sameTypeSources = viewModel.videoSources.filter { $0.type == source.type }
+        downloadSources = sameTypeSources.isEmpty ? [source] : sameTypeSources
+        selectedDownloadSource = source
+        downloadTitle = "视频_\(source.type)_\(source.quality ?? "默认")"
+        showDownloadDialog = true
+    }
+
+    private func confirmDownload() {
+        guard let source = selectedDownloadSource else { return }
+        downloadManager.startDownload(url: source.url, title: downloadTitle)
+        showDownloadDialog = false
     }
 
     // MARK: - Toast
